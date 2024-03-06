@@ -83,7 +83,7 @@ func (s *imageSync) getFullImages(ctx context.Context, images []Image) ([]Image,
 			s:     s,
 			exec: func(ctx context.Context, image Image, s *imageSync) error {
 				log.Printf("start to check manifest exists of %s:%s", image.Name, image.Tag)
-				exists, err := s.dr.ManifestsExists(ctx, image.Name, image.Tag)
+				exists, err := s.dr.ManifestV2Exists(ctx, image.Name, image.Tag)
 				image.Exists = exists
 				if err != nil {
 					return fmt.Errorf("failed to check manifest exists of %s:%s: %v", image.Name, image.Tag, err)

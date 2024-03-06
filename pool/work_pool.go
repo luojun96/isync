@@ -42,7 +42,7 @@ func (p *WorkPool) Run(ctx context.Context) {
 		}(task)
 	}
 
-	if err := p.sem.Acquire(ctx, int64(p.size)); err != nil {
+	if err := p.sem.Acquire(ctx, p.size); err != nil {
 		log.Printf("failed to acquire semaphore: %v", err)
 	}
 }
