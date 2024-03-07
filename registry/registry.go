@@ -61,11 +61,11 @@ func (r *DockerRegistry) ManifestV2Exists(ctx context.Context, repo string, ref 
 	return false, nil
 }
 
-func (r *DockerRegistry) ManifestV2(ctx context.Context, repo string, ref string) (*manifestV2.DeserializedManifest, error) {
-	return nil, nil
+func (r *DockerRegistry) ManifestV2(ctx context.Context, repo string, ref string) (manifestV2.DeserializedManifest, error) {
+	return manifestV2.DeserializedManifest{}, nil
 }
 
-func (r *DockerRegistry) manifestV2Put(ctx context.Context, repo string, ref string, manifest *manifestV2.DeserializedManifest) error {
+func (r *DockerRegistry) ManifestV2Put(ctx context.Context, repo string, ref string, manifest manifestV2.DeserializedManifest) error {
 	return nil
 }
 

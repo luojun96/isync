@@ -1,8 +1,8 @@
 package cts
 
 import (
-	"github.com/distribution/distribution"
 	manifestV2 "github.com/distribution/distribution/manifest/schema2"
+	"github.com/docker/distribution"
 )
 
 type Image struct {
@@ -10,12 +10,12 @@ type Image struct {
 	Tag      string
 	Exists   bool
 	Manifest manifestV2.DeserializedManifest
-	Layers   []*ImageLayer
+	Layers   []Layer
 }
 
-type ImageLayer struct {
-	Ref    Image
-	Layer  distribution.Descriptor
-	Exists bool
-	Synced bool
+type Layer struct {
+	Ref        Image
+	Descriptor distribution.Descriptor
+	Exists     bool
+	Synced     bool
 }
