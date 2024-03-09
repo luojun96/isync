@@ -123,7 +123,7 @@ func (r *DockerRegistry) ManifestV2Put(ctx context.Context, repo string, ref str
 	}
 
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("failed to put manifest %s:%s, status code: %d", repo, ref, resp.StatusCode)
+		return fmt.Errorf("failed to put manifest of image %s:%s, status code: %d", repo, ref, resp.StatusCode)
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 )
 
 const Concurrency int = 3
+
+var concurrency int
 
 type task[T any] struct {
 	t    T
@@ -41,6 +44,8 @@ func NewImageSync(sr registry.Registry, dr registry.Registry) ArtifactSync {
 func (s *imageSync) Sync(ctx context.Context, artifacts []string) error {
 	start := time.Now()
 
+	concurrency = runtime.GOMAXPROCS(0)
+	log.Printf("concurrency: %d\n", concurrency)
 	images, err := s.getImages(ctx, artifacts)
 	if err != nil {
 		return fmt.Errorf("failed to get images: %v", err)
@@ -61,15 +66,12 @@ func (s *imageSync) Sync(ctx context.Context, artifacts []string) error {
 		log.Printf("[%vs] All images already exist in destination registry, skipped to push.\n", int(time.Since(start).Seconds()))
 		return nil
 	}
-
 	log.Printf("[%vs] %d of %d images do not exist in destination registry, will be pushed.\n", int(time.Since(start).Seconds()), len(imagesToPush), len(images))
 
-	log.Println("set the manifest of images...")
 	if err = s.setManifest(ctx, imagesToPush); err != nil {
 		return fmt.Errorf("failed to set manifest: %v", err)
 	}
 
-	log.Println("get image layers...")
 	layers := s.getLayers(imagesToPush)
 	if err = s.initLayers(ctx, layers); err != nil {
 		return fmt.Errorf("failed to initialize layers: %v", err)
@@ -84,7 +86,10 @@ func (s *imageSync) Sync(ctx context.Context, artifacts []string) error {
 
 	log.Printf("[%vs] %d of %d layers do not exist in destination registry, will be pushed.\n", int(time.Since(start).Seconds()), len(layersToPush), len(layers))
 
-	s.pushLayers(ctx, layersToPush)
+	if err = s.pushLayers(ctx, layersToPush); err != nil {
+		return fmt.Errorf("failed to push layers: %v", err)
+	}
+
 	if err = s.mountLayers(ctx, layersToPush); err != nil {
 		return fmt.Errorf("failed to mount layers: %v", err)
 	}
@@ -122,8 +127,19 @@ func (s *imageSync) initImages(ctx context.Context, images []*Image) error {
 		if err != nil {
 			return fmt.Errorf("failed to check manifest exists of %s:%s: %v", image.Name, image.Tag, err)
 		}
+
+		if image.Tag == "latest" {
+			srcManifest, err := s.Source().ManifestV2(ctx, image.Name, "latest")
+			if err != nil {
+				return fmt.Errorf("failed to get manifest of %s:%s in source registry: %v", image.Name, image.Tag, err)
+			}
+			destManifest, err := s.Destination().ManifestV2(ctx, image.Name, "latest")
+			if err == nil && destManifest.Config.Digest == srcManifest.Config.Digest {
+				image.Exists = true
+			}
+		}
 		if image.Exists {
-			log.Printf("Image %s:%s already exists in destination registry, skipped to push.\n", image.Name, image.Tag)
+			log.Printf("image %s:%s already exists in destination registry, skipped to push.\n", image.Name, image.Tag)
 		} else {
 			log.Printf("Image %s:%s does not exist in destination registry, will be pushed.\n", image.Name, image.Tag)
 		}
@@ -156,6 +172,7 @@ func (s *imageSync) initImages(ctx context.Context, images []*Image) error {
 }
 
 func (s *imageSync) setManifest(ctx context.Context, images []*Image) error {
+	log.Println("set the manifest of images...")
 	var handler = func(ctx context.Context, image *Image, s ArtifactSync) error {
 		var err error
 		image.Manifest, err = s.Source().ManifestV2(ctx, image.Name, image.Tag)
@@ -192,6 +209,7 @@ func (s *imageSync) setManifest(ctx context.Context, images []*Image) error {
 }
 
 func (s *imageSync) getLayers(images []*Image) []*Layer {
+	log.Println("get image layers...")
 	var layers []*Layer
 	for _, image := range images {
 		layers = append(layers, &Layer{*image, image.Manifest.Config, false, false})
@@ -250,7 +268,7 @@ func (s *imageSync) pushLayers(ctx context.Context, layers []*Layer) error {
 		if digest != nil {
 			defer digest.Close()
 		}
-		if err = s.Destination().LayerUpload(ctx, layer.Ref.Name, layer.Descriptor.Digest, digest); err != nil {
+		if err = s.Destination().LayerUpload(ctx, "trunk", layer.Descriptor.Digest, digest); err != nil {
 			return fmt.Errorf("failed to upload layer %s:%s: %v", layer.Ref.Name, layer.Descriptor.Digest, err)
 		}
 		layer.Synced = true
@@ -330,11 +348,11 @@ func (s *imageSync) mountLayers(ctx context.Context, layers []*Layer) error {
 func (s *imageSync) createManifests(ctx context.Context, images []*Image) error {
 	log.Println("create manifests...")
 	var handler = func(ctx context.Context, image *Image, s ArtifactSync) error {
-		log.Printf("create manifest %s:%s in destination registry...\n", image.Name, image.Tag)
+		log.Printf("create manifest of image %s:%s in destination registry...\n", image.Name, image.Tag)
 		if err := s.Destination().ManifestV2Put(ctx, image.Name, image.Tag, image.Manifest); err != nil {
 			return fmt.Errorf("failed to put manifest %s:%s: %v", image.Name, image.Tag, err)
 		}
-		log.Printf("create manifest %s:%s in destination registry successfully.\n", image.Name, image.Tag)
+		log.Printf("create manifest of image %s:%s in destination registry successfully.\n", image.Name, image.Tag)
 		return nil
 	}
 
@@ -370,6 +388,14 @@ func (s *imageSync) checkImages(ctx context.Context, images []*Image) error {
 		if err != nil {
 			return fmt.Errorf("failed to check manifest exists of %s:%s: %v", image.Name, image.Tag, err)
 		}
+
+		if image.Tag == "latest" {
+			destManifest, err := s.Destination().ManifestV2(ctx, image.Name, "latest")
+			if err == nil && destManifest.Config.Digest == image.Manifest.Config.Digest {
+				exists = true
+			}
+		}
+
 		if !exists {
 			log.Printf("the manifest of image %s:%s does not exist in destination registry, failed to push.\n", image.Name, image.Tag)
 			return fmt.Errorf("the manifest of image %s:%s does not exist in destination registry", image.Name, image.Tag)
@@ -397,7 +423,7 @@ func (s *imageSync) checkImages(ctx context.Context, images []*Image) error {
 			return errors.New("failed to convert task to *task[*Image]")
 		}
 		if item.err != nil {
-			return errors.New("manifests aren't created successfully")
+			return fmt.Errorf("failed to check image %s:%s: %v", item.t.Name, item.t.Tag, item.err)
 		}
 	}
 
